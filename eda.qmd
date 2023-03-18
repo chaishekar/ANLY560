@@ -1,0 +1,1558 @@
+---
+title: "Exploratory Data Analysis"
+editor: visual
+format:
+  html:
+    code-fold: true
+    self-contained: true
+---
+
+```{r ,echo=FALSE, message=FALSE, warning=FALSE}
+library(flipbookr)
+library(tidyverse)
+library(ggplot2)
+library(forecast)
+library(astsa) 
+library(xts)
+library(tseries)
+library(fpp2)
+library(fma)
+library(lubridate)
+library(tidyverse)
+library(TSstudio)
+library(quantmod)
+library(tidyquant)
+library(plotly)
+library(ggplot2)
+require(gridExtra)
+options(dplyr.summarise.inform = FALSE)
+```
+
+EDA test will be executed for the top most company in each of the indices which are UnitedHealth Group Incorporated, Apple and Microsoft and the Macroeconomic Factors.
+
+### UnitedHealth Group Incorporated
+
+UnitedHealth Group, Inc. provides a wide range of health care products and services, such as health maintenance organizations (HMOs), point of service plans (POS), preferred provider organizations (PPOs), and managed fee-for-service programs.
+
+UnitedHealth has the largest and most diverse membership base within the managed-care organization market, which gives it significant competitive advantages. It has built its prescription drug business through OptumRx division, with the acquisition of Catamaran. The company has acquired a number of competing healthcare providers. These acquisitions have transformed it from a pure health insurer to a comprehensive healthcare provider.
+
+##### Time Series Plot
+
+```{r warning=FALSE}
+# get data
+options("getSymbols.warning4.0"=FALSE)
+options("getSymbols.yahoo.warning"=FALSE)
+
+
+data = getSymbols("UNH",src='yahoo', from = '2018-01-01',to = "2023-03-01")
+
+df <- data.frame(Date=index(UNH),coredata(UNH))
+
+# create Bollinger Bands
+bbands <- BBands(UNH[,c("UNH.High","UNH.Low","UNH.Close")])
+
+# join and subset data
+df <- subset(cbind(df, data.frame(bbands[,1:3])), Date >= "2018-01-01")
+
+#export the data 
+uhn_data <- df
+write.csv(uhn_data, "DATA/CLEANED DATA/uhn_raw_data.csv", row.names=FALSE)
+
+# colors column for increasing and decreasing
+for (i in 1:length(df[,1])) {
+  if (df$UNH.Close[i] >= df$UNH.Open[i]) {
+      df$direction[i] = 'Increasing'
+  } else {
+      df$direction[i] = 'Decreasing'
+  }
+}
+
+i <- list(line = list(color = '#6F9860'))
+d <- list(line = list(color = '#7F7F7F'))
+
+# plot candlestick chart
+
+fig <- df %>% plot_ly(x = ~Date, type="candlestick",
+          open = ~UNH.Open, close = ~UNH.Close,
+          high = ~UNH.High, low = ~UNH.Low, name = "UNH",
+          increasing = i, decreasing = d) 
+fig <- fig %>% add_lines(x = ~Date, y = ~up , name = "B Bands",
+            line = list(color = '#ccc', width = 0.5),
+            legendgroup = "Bollinger Bands",
+            hoverinfo = "none", inherit = F) 
+fig <- fig %>% add_lines(x = ~Date, y = ~dn, name = "B Bands",
+            line = list(color = '#ccc', width = 0.5),
+            legendgroup = "Bollinger Bands", inherit = F,
+            showlegend = FALSE, hoverinfo = "none") 
+fig <- fig %>% add_lines(x = ~Date, y = ~mavg, name = "Mv Avg",
+            line = list(color = '#E377C2', width = 0.5),
+            hoverinfo = "none", inherit = F) 
+fig <- fig %>% layout(yaxis = list(title = "Price"))
+
+# plot volume bar chart
+fig2 <- df 
+fig2 <- fig2 %>% plot_ly(x=~Date, y=~UNH.Volume, type='bar', name = "UNH Volume",
+          color = ~direction, colors = c('#6F9860','#7F7F7F')) 
+fig2 <- fig2 %>% layout(yaxis = list(title = "Volume"))
+
+# create rangeselector buttons
+rs <- list(visible = TRUE, x = 0.5, y = -0.055,
+           xanchor = 'center', yref = 'paper',
+           font = list(size = 9),
+           buttons = list(
+             list(count=1,
+                  label='RESET',
+                  step='all'),
+             list(count=3,
+                  label='3 YR',
+                  step='year',
+                  stepmode='backward'),
+             list(count=1,
+                  label='1 YR',
+                  step='year',
+                  stepmode='backward'),
+             list(count=1,
+                  label='1 MO',
+                  step='month',
+                  stepmode='backward')
+           ))
+
+# subplot with shared x axis
+fig <- subplot(fig, fig2, heights = c(0.7,0.2), nrows=2,
+             shareX = TRUE, titleY = TRUE)
+fig <- fig %>% layout(title = paste("UnitedHealth Group Incorporated: January 2018 - March 2023"),
+         xaxis = list(rangeselector = rs),
+         legend = list(orientation = 'h', x = 0.5, y = 1,
+                       xanchor = 'center', yref = 'paper',
+                       font = list(size = 10),
+                       bgcolor = 'transparent'))
+
+fig
+
+```
+
+The above graph, clearly indicates that there is upward trend un the stock price of United Health Group Incorporated from 2018 to 2023. Share prices are generally trending upwards. There are some ups and downs of various sizes. Past few years there has been fluctuation in the stock price is because the health insurers' medical costs is high since 2019, this was an impact due to Covid19. Since there is seasonal variations keep on increasing proportionally to the trend, multiplicative decomposition method is recommended.
+
+#### Decomposed Time Series
+
+::: panel-tabset
+
+##### Decomposition Plot
+
+```{r warning=FALSE}
+#time series data
+myts<-ts(df$UNH.Adjusted,frequency=365,start=c(2018,1,1)) 
+#original plot for time series data
+orginial_plot <- autoplot(myts,xlab ="Year", ylab = "Adjusted Closing Price", main = "UnitedHealth Group Incorporated Stock price: Jan 2018 - March 2023")
+#decompose the data
+decompose = decompose(myts, "multiplicative")
+#decomposition plot
+autoplot(decompose)
+```
+
+##### Adjusted Decomposition Plot
+```{r warning=FALSE}
+#adjusted plot
+trendadj <- myts/decompose$trend
+decompose_adjtrend_plot <- autoplot(trendadj,ylab='trend') +ggtitle('Adjusted trend component in the multiplicative time series model')
+seasonaladj <- myts/decompose$seasonal
+decompose_adjseasonal_plot <- autoplot(seasonaladj,ylab='seasonal') +ggtitle('Adjusted seasonal component in the multiplicative time series model')
+grid.arrange(orginial_plot, decompose_adjtrend_plot,decompose_adjseasonal_plot, nrow=3)
+
+```
+
+:::
+
+The adjusted seasonal component tend to have upward trend and there is more variability in the model when compared to the original plot where the variation during the years but the adjusted trend then to have more fluctuation showing no trend when compared to the original plot.
+
+#### Lag Plots
+
+::: panel-tabset
+
+##### Daily Time Lags
+
+```{r warning=FALSE}
+#Lag plots 
+gglagplot(myts, do.lines=FALSE, lags=1)+xlab("Lag 1")+ylab("Yi")+ggtitle("Lag Plot for UnitedHealth Group Incorporated Stock Jan 2018 - March 2023")
+```
+
+##### Monthly Time Lags
+```{r warning=FALSE}
+#montly data
+mean_data <- df %>% 
+  mutate(month = month(Date), year = year(Date)) %>% 
+  group_by(year, month) %>% 
+  summarize(mean_value = mean(UNH.Adjusted))
+month<-ts(mean_data$mean_value,star=decimal_date(as.Date("2018-01-01",format = "%Y-%m-%d")),frequency = 12)
+#Lag plot
+ts_lags(month)
+```
+:::
+
+Lag Plot for UnitedHealth Group Incorporated Stock Jan 2018 - March 2023, there should be a strong link between the series and the related lag as there are positive correlation and inclined to 45 degree.This is the lag plot signature of a process with strong positive autocorrelation. Such processes are highly non-random--there is strong association between an observation and a succeeding observation. Additionally, seasonality can be examined by plotting observations for a larger number of time periods i.e. the lags. Using the mean function, the time series data is aggregated to monthly data for better understanding of the series and for the clearer plots. Observing the last graph closely reveals that more dots are on to the diagonal line at 45 degrees.the second graph indicates the monthly of the variable on the vertical axis. The lines connect points in chronological order. The association is highly positive, demonstrating the strong seasonality in the data, and there is a correlation.
+
+#### Moving Average
+::: panel-tabset
+
+##### 4 Month MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="Data") +
+  autolayer(ma(month,5), series="4 Month MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("UnitedHealth Group Incorporated Stock Jan 2018 - March 2023(4 Month Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","4 Month MA"="red"),
+                      breaks=c("Data","4 Month MA"))
+ma
+```
+
+##### 1 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="Data") +
+  autolayer(ma(month,13), series="1 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("UnitedHealth Group Incorporated Stock Jan 2018 - March 2023(1 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","1 Year MA"="red"),
+                      breaks=c("Data","1 Year MA"))
+ma
+```
+
+##### 3 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="Data") +
+  autolayer(ma(month,37), series="3 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("UnitedHealth Group Incorporated Stock Jan 2018 - March 2023(3 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","3 Year MA"="red"),
+                      breaks=c("Data","3 Year MA"))
+ma
+```
+
+:::
+
+The four plots show the UnitedHealth Group Incorporated stock prices from January 2018 to March 2023, along with the moving averages for 4 months, 1 year and 3 years. As the window of the moving average increases, the smoother the trend line becomes, reducing the impact of noise and fluctuations in the original time series.
+
+The 4-month moving average plot shows frequent fluctuations in the stock price, with the trend line following the general direction of the time series. The 1-year moving average plot shows a smoother trend, following the overall upward trend of the stock price.
+
+The 3-year moving average plot shows a similar trend to the 1-year plot but is even smoother, with fewer fluctuations. Finally, the 3-year moving average plot shows the smoothest trend, with an almost constant upward slope.As the moving average window increases, the smoother trend allows for a clearer identification of the general trend of the UnitedHealth Group Incorporated stock prices over time. From the moving average obtained above we can see that there is upward tend in the stock price of UnitedHealth Group Incorporated.
+
+#### Autocorrelation Time Series
+::: panel-tabset
+
+##### ACF
+```{r warning=FALSE}
+#ACF for monthly data
+ggAcf(myts)+ggtitle("ACF Plot for UnitedHealth Group Incorporated Stock Jan 2018 - March 2023")
+```
+
+##### PACF
+```{r warning=FALSE}
+#PACF for monthly data
+ggPacf(myts)+ggtitle("PACF Plot for UnitedHealth Group Incorporated Stock Jan 2018 - March 2023")
+```
+
+##### ADF Test
+```{r warning=FALSE}
+#check the stationarity
+tseries::adf.test(myts)
+```
+:::
+
+In the plot of autocorrelation function, which is the acf graph for monthly data, there are clear autocorrelation in lag. The above lag plots and autocorrelation plot indicates seasonality in the series, which means the series is not stationary.. It was also verified using Augmented Dickey-Fuller Test which tells us that as the p value is greater than 0.05, the series is not stationary.
+
+
+#### Detrend and Differenced Time Series
+
+::: panel-tabset
+
+##### Linear Fitting Model
+```{r warning=FALSE}
+fit = lm(myts~time(myts), na.action=NULL) 
+summary(fit) 
+```
+
+##### ACF Plot
+```{r warning=FALSE}
+# plot ACFs
+plot1 <- ggAcf(myts, 48, main="Original Data: UnitedHealth Group Incorporated Stock Price")
+plot2 <- ggAcf(resid(fit), 48, main="Detrended data")
+plot3 <- ggAcf(diff(myts), 48, main="First differenced data")
+grid.arrange(plot1, plot2, plot3, nrow=3)
+
+```
+:::
+
+The estimated slope coefficient β1, 1.008e+02. With a standard error of 1.011e+00, yielding a significant estimated increase of stock price is very less yearly. Equation of the fit for stationary process: $$\hat{y}_{t} = x_{t}+(2.032e+05)-(1.008e+02)t$$
+
+From the above graph we can say that there is high correlation in the original plot, but in the detrended plot the correlation is reduced but there is still high correlation in the detrended data.But when the first order difference is applied the high correlation is removed but there is no seasonal correlation. 
+
+As depicted in the above figure, the series is now stationary and ready for future study.
+
+### Apple
+
+Apple Inc. designs, manufactures, and markets smartphones, PCs, tablets, wearables, and accessories all over the world. It also sells a number of services that are related. The company also has a line of smartphones called iPhone, a line of personal computers called Mac, a line of tablets called iPad that can be used for many different things, and wearables, home, and accessories like AirPods, Apple TV, Apple Watch, Beats products, and HomePod. It also offers AppleCare support and cloud services store services. It runs different platforms, like the App Store, where customers can find and download apps and digital content like books, music, video, games, and podcasts. The company also offers services like Apple Arcade, which is a subscription game service, Apple Fitness+, which is a personalized fitness service, Apple Music, which gives users a curated listening experience with on-demand radio stations, Apple News+, which is a subscription news and magazine service, Apple TV+, which has exclusive original content, Apple Card, which is a co-branded credit card, and Apple Pay, which is a cashless payment service. It also licenses its intellectual property. Customers, small and medium-sized businesses, education, large businesses, and the government are all served by the company. It sells apps made by other companies for its own products through the App Store. The company also sells its products through its own retail and online stores, direct sales force, and third-party cellular network carriers, wholesalers, retailers, and resellers. Apple Inc. was founded in 1977 and has its main office in Cupertino, California.
+
+##### Time Series Plot 
+
+```{r warning=FALSE}
+# get data
+options("getSymbols.warning4.0"=FALSE)
+options("getSymbols.yahoo.warning"=FALSE)
+
+
+data = getSymbols("AAPL",src='yahoo',from = '2018-01-01',to = "2023-03-01")
+
+df <- data.frame(Date=index(AAPL),coredata(AAPL))
+
+# create Bollinger Bands
+bbands <- BBands(AAPL[,c("AAPL.High","AAPL.Low","AAPL.Close")])
+
+# join and subset data
+df <- subset(cbind(df, data.frame(bbands[,1:3])), Date >= "2018-01-01")
+
+#export data
+apple_raw_data <- df
+write.csv(apple_raw_data, "DATA/CLEANED DATA/apple_raw_data.csv", row.names=FALSE)
+
+# colors column for increasing and decreasing
+for (i in 1:length(df[,1])) {
+  if (df$AAPL.Close[i] >= df$AAPL.Open[i]) {
+      df$direction[i] = 'Increasing'
+  } else {
+      df$direction[i] = 'Decreasing'
+  }
+}
+
+i <- list(line = list(color = '#CCCCFF'))
+d <- list(line = list(color = '#7F7F7F'))
+
+# plot candlestick chart
+
+fig <- df %>% plot_ly(x = ~Date, type="candlestick",
+          open = ~AAPL.Open, close = ~AAPL.Close,
+          high = ~AAPL.High, low = ~AAPL.Low, name = "AAPL",
+          increasing = i, decreasing = d) 
+fig <- fig %>% add_lines(x = ~Date, y = ~up , name = "B Bands",
+            line = list(color = '#ccc', width = 0.5),
+            legendgroup = "Bollinger Bands",
+            hoverinfo = "none", inherit = F) 
+fig <- fig %>% add_lines(x = ~Date, y = ~dn, name = "B Bands",
+            line = list(color = '#ccc', width = 0.5),
+            legendgroup = "Bollinger Bands", inherit = F,
+            showlegend = FALSE, hoverinfo = "none") 
+fig <- fig %>% add_lines(x = ~Date, y = ~mavg, name = "Mv Avg",
+            line = list(color = '#E377C2', width = 0.5),
+            hoverinfo = "none", inherit = F) 
+fig <- fig %>% layout(yaxis = list(title = "Price"))
+
+# plot volume bar chart
+fig2 <- df 
+fig2 <- fig2 %>% plot_ly(x=~Date, y=~AAPL.Volume, type='bar', name = "AAPL Volume",
+          color = ~direction, colors = c('#CCCCFF','#7F7F7F')) 
+fig2 <- fig2 %>% layout(yaxis = list(title = "Volume"))
+
+# create rangeselector buttons
+rs <- list(visible = TRUE, x = 0.5, y = -0.055,
+           xanchor = 'center', yref = 'paper',
+           font = list(size = 9),
+           buttons = list(
+             list(count=1,
+                  label='RESET',
+                  step='all'),
+             list(count=1,
+                  label='1 YR',
+                  step='year',
+                  stepmode='backward'),
+             list(count=3,
+                  label='3 MO',
+                  step='month',
+                  stepmode='backward'),
+             list(count=1,
+                  label='1 MO',
+                  step='month',
+                  stepmode='backward')
+           ))
+
+# subplot with shared x axis
+fig <- subplot(fig, fig2, heights = c(0.7,0.2), nrows=2,
+             shareX = TRUE, titleY = TRUE)
+fig <- fig %>% layout(title = paste("Apple Stock Price: January 2018 - March 2023" ),
+         xaxis = list(rangeselector = rs),
+         legend = list(orientation = 'h', x = 0.5, y = 1,
+                       xanchor = 'center', yref = 'paper',
+                       font = list(size = 10),
+                       bgcolor = 'transparent'))
+
+fig
+
+
+```
+
+The above graph, clearly indicates that there is upward trend un the stock price of Apple from 2018 to 2023. Share prices are generally trending upwards. There are some ups and downs of various sizes. Past few years there has been fluctuation in the stock price, during 2022 the production problems in Chinese factories are putting downward pressure on stock prices. There is fluctuation in the price also because of the product realse and the demand for the product during a certain o=period in a year. Since there is seasonal variations keep on increasing proportionally to the trend, multiplicative decomposition method is recommended.
+
+#### Decomposed Time Series
+
+::: panel-tabset
+
+##### Decomposition Plot
+
+```{r warning=FALSE}
+#convert to ts data
+myts<-ts(df$AAPL.Adjusted,frequency=365,start=c(2018,1,1)) 
+orginial_plot <- autoplot(myts,xlab ="Year", ylab = "Adjusted Closing Price", main = "Apple Stock price: Jan 2018 - March 2023")
+decompose = decompose(myts, "multiplicative")
+autoplot(decompose)
+```
+
+##### Adjusted Decomposition Plot
+```{r warning=FALSE}
+#adjusted decomposition
+trendadj <- myts/decompose$trend
+decompose_adjtrend_plot <- autoplot(trendadj,ylab='trend') +ggtitle('Adjusted trend component in the multiplicative time series model')
+seasonaladj <- myts/decompose$seasonal
+decompose_adjseasonal_plot <- autoplot(seasonaladj,ylab='seasonal') +ggtitle('Adjusted seasonal component in the multiplicative time series model')
+grid.arrange(orginial_plot, decompose_adjtrend_plot,decompose_adjseasonal_plot, nrow=3)
+```
+
+:::
+
+When compared to the original plot, the adjusted seasonal component tends to have an upward trend, and the model is more variable than the original plot, where the plot changes over time but the trend stays the same.
+
+#### Lag Plots
+::: panel-tabset
+
+##### Daily Time Lags
+```{r warning=FALSE}
+#Lag plots 
+gglagplot(myts, do.lines=FALSE, lags=1)+xlab("Lag 1")+ylab("Yi")+ggtitle("Lag Plot for Apple Stock Jan 2018 - March 2023")
+```
+
+##### Monthly Time Lags
+```{r arning=FALSE}
+#montly data
+mean_data <- df %>% 
+  mutate(month = month(Date), year = year(Date)) %>% 
+  group_by(year, month) %>% 
+  summarize(mean_value = mean(AAPL.Adjusted))
+#ts of montly data
+month<-ts(mean_data$mean_value,star=decimal_date(as.Date("2018-01-01",format = "%Y-%m-%d")),frequency = 12)
+
+#Lag plot for month
+ts_lags(month)
+```
+:::
+
+Apple Stock's Lag Plot From January 2018 to March 2023, there should be a strong connection between the series and the related lag, since there is a positive correlation and a 45-degree slope. This is how a process that has strong positive autocorrelation shows up in a lag plot. Such processes are not very random, because there is a strong link between one observation and the next. Another way to look at seasonality is to plot observations for a larger number of time periods, called "lags." Using the mean function, the time series data is turned into monthly data so that the series can be better understood and the plots can be more clear. If you look closely at the last graph, you can see that there are more dots on the diagonal line at 45 degrees. On the vertical axis of the second graph, the month of the variable is shown. The lines link the points in order of time. The seasonality in the data is shown by the fact that the relationship is positive and there is a correlation.
+
+
+#### Moving Average
+::: panel-tabset
+
+##### 4 Month MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="Data") +
+  autolayer(ma(month,5), series="4 Month MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Apple Stock Jan 2018 - March 2023(4 Month Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","4 Month MA"="red"),
+                      breaks=c("Data","4 Month MA"))
+ma
+```
+
+##### 1 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="Data") +
+  autolayer(ma(month,13), series="1 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Apple Stock Jan 2018 - March 2023 (1 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","1 Year MA"="red"),
+                      breaks=c("Data","1 Year MA"))
+ma
+```
+
+
+##### 3 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="Data") +
+  autolayer(ma(month,37), series="3 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Apple Stock Jan 2018 - March 2023(3 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","3 Year MA"="red"),
+                      breaks=c("Data","3 Year MA"))
+ma
+```
+
+:::
+
+The four plots above show the Apple stock price from January 2018 to March 2023 with different timeframes of moving averages (MA) overlaid. The moving average is a common smoothing technique used to reduce the noise in the time series data and highlight underlying trends. As the length of the MA window increases, the smoother the plot becomes and the trend is more visible. The first plot shows a 4-month moving average, the second plot shows a 1-year moving averagea and the third plot shows a 3-year moving average
+
+Comparing the plots, we can see that as the length of the moving average window increases, the plot becomes smoother, and the trend becomes clearer. In the 4-month moving average plot, the stock price fluctuates significantly, making it challenging to identify the trend. However, in the 3-year moving average plot, we can observe a clear upward trend in the stock price, and it is easier to identify the long-term trend. From the moving average obtained above we can see that there is upward tend in the stock price of Apple.
+
+
+#### Autocorrelation Time Series
+::: panel-tabset
+
+##### ACF
+
+```{r warning=FALSE}
+
+#ACF plots for month data
+ggAcf(myts, 120)+ggtitle("ACF Plot for Apple Stock Jan 2018 - March 2023")
+```
+
+##### PACF
+
+```{r warning=FALSE}
+#PACF plots for month data
+ggPacf(myts, 120)+ggtitle("PACF Plot for Apple Stock Jan 2018 - March 2023")
+```
+
+##### ADF Test
+```{r warning=FALSE}
+# ADF Test
+tseries::adf.test(myts)
+```
+
+:::
+
+There is clear autocorrelation in lag in the plot of autocorrelation function, which is the acf graph for monthly data. The above lag plots and autocorrelation plots show that the series has seasonality, which means that the series doesn't stay the same over time. It was also checked with the Augmented Dickey-Fuller Test. This test tells us that the series is not stationary because the p value is greater than 0.05.
+
+
+#### Detrend and Differenced Time Series
+
+::: panel-tabset
+
+##### Linear Fitting Model
+
+```{r warning=FALSE}
+fit = lm(myts~time(myts), na.action=NULL) 
+summary(fit) 
+```
+
+##### ACF Plot
+```{r warning=FALSE}
+
+# plot ACFs
+plot1 <- ggAcf(myts, 48, main="Original Data: Apple Stock Price")
+plot2 <- ggAcf(resid(fit), 48, main="Detrended data") 
+plot3 <- ggAcf(diff(myts), 48, main="First differenced data")
+grid.arrange(plot1, plot2, plot3,nrow=3)
+```
+
+:::
+
+The estimated slope coefficient β1, 4.248e+01. With a standard error of 4.436e-01, yielding a significant estimated increase of stock price is very less yearly. Equation of the fit for stationary process: $$\hat{y}_{t} = x_{t}+(8.570e+04)-(4.248e+01)t$$ From the above graph, we can see that the original plot has a high correlation, while the detrended plot has a lower correlation but still a high correlation. But when the first order difference is used, the high correlation goes away, but there is still a correlation between the time of year and the data.
+
+As depicted in the above figure, the series is now stationary and ready for future study.
+
+### Microsoft
+
+##### Time Series Plot
+
+```{r warning=FALSE}
+# get data
+options("getSymbols.warning4.0"=FALSE)
+options("getSymbols.yahoo.warning"=FALSE)
+
+
+data = getSymbols("MSFT",src='yahoo',from = '2018-01-01',to = "2023-03-01")
+
+df <- data.frame(Date=index(MSFT),coredata(MSFT))
+
+# create Bollinger Bands
+bbands <- BBands(MSFT[,c("MSFT.High","MSFT.Low","MSFT.Close")])
+
+# join and subset data
+df <- subset(cbind(df, data.frame(bbands[,1:3])), Date >= "2018-01-01")
+
+#export data
+microsoft_raw_data <- df
+write.csv(microsoft_raw_data, "DATA/CLEANED DATA/microsoft_raw_data.csv", row.names=FALSE)
+
+# colors column for increasing and decreasing
+for (i in 1:length(df[,1])) {
+  if (df$MSFT.Close[i] >= df$MSFT.Open[i]) {
+      df$direction[i] = 'Increasing'
+  } else {
+      df$direction[i] = 'Decreasing'
+  }
+}
+
+i <- list(line = list(color = '#EBD168'))
+d <- list(line = list(color = '#7F7F7F'))
+
+# plot candlestick chart
+
+fig <- df %>% plot_ly(x = ~Date, type="candlestick",
+          open = ~MSFT.Open, close = ~MSFT.Close,
+          high = ~MSFT.High, low = ~MSFT.Low, name = "MSFT",
+          increasing = i, decreasing = d) 
+fig <- fig %>% add_lines(x = ~Date, y = ~up , name = "B Bands",
+            line = list(color = '#ccc', width = 0.5),
+            legendgroup = "Bollinger Bands",
+            hoverinfo = "none", inherit = F) 
+fig <- fig %>% add_lines(x = ~Date, y = ~dn, name = "B Bands",
+            line = list(color = '#ccc', width = 0.5),
+            legendgroup = "Bollinger Bands", inherit = F,
+            showlegend = FALSE, hoverinfo = "none") 
+fig <- fig %>% add_lines(x = ~Date, y = ~mavg, name = "Mv Avg",
+            line = list(color = '#E377C2', width = 0.5),
+            hoverinfo = "none", inherit = F) 
+fig <- fig %>% layout(yaxis = list(title = "Price"))
+
+# plot volume bar chart
+fig2 <- df 
+fig2 <- fig2 %>% plot_ly(x=~Date, y=~MSFT.Volume, type='bar', name = "MSFT Volume",
+          color = ~direction, colors = c('#EBD168','#7F7F7F')) 
+fig2 <- fig2 %>% layout(yaxis = list(title = "Volume"))
+
+# create rangeselector buttons
+rs <- list(visible = TRUE, x = 0.5, y = -0.055,
+           xanchor = 'center', yref = 'paper',
+           font = list(size = 9),
+           buttons = list(
+             list(count=1,
+                  label='RESET',
+                  step='all'),
+             list(count=1,
+                  label='1 YR',
+                  step='year',
+                  stepmode='backward'),
+             list(count=3,
+                  label='3 MO',
+                  step='month',
+                  stepmode='backward'),
+             list(count=1,
+                  label='1 MO',
+                  step='month',
+                  stepmode='backward')
+           ))
+
+# subplot with shared x axis
+fig <- subplot(fig, fig2, heights = c(0.7,0.2), nrows=2,
+             shareX = TRUE, titleY = TRUE)
+fig <- fig %>% layout(title = paste("Microsoft Stock Price: January 2018 - March 2023"),
+         xaxis = list(rangeselector = rs),
+         legend = list(orientation = 'h', x = 0.5, y = 1,
+                       xanchor = 'center', yref = 'paper',
+                       font = list(size = 10),
+                       bgcolor = 'transparent'))
+
+fig
+
+```
+
+The above graph, clearly indicates that there is upward trend un the stock price of Microsoft from 2018 to 2023. Share prices are generally trending upwards. There are some ups and downs of various sizes. Past few years there has been fluctuation in the stock price is because economic challenges fueled Microsoft's fall from grace. High inflation slowed revenue growth and supercharged operating expenses, a one-two punch that led to a disappointing financial performance over the past year. Since there is seasonal variations keep on increasing proportionally to the trend, multiplicative decomposition method is recommended.
+
+#### Decomposed Time Series
+
+::: panel-tabset
+
+##### Decomposition Plot
+
+```{r warning=FALSE}
+#convert data to ts data
+myts<-ts(df$MSFT.Adjusted,frequency=365,start=c(2018,1,1)) 
+orginial_plot <- autoplot(myts,xlab ="Year", ylab = "Adjusted Closing Price", main = "Microsoft Stock price: Jan 2018 - March 2023")
+decompose = decompose(myts, "multiplicative")
+autoplot(decompose)
+```
+
+##### Adjusted Decomposition Plot
+```{r warning=FALSE}
+#adjusted decomposition
+trendadj <- myts/decompose$trend
+decompose_adjtrend_plot <- autoplot(trendadj,ylab='trend') +ggtitle('Adjusted trend component in the multiplicative time series model')
+seasonaladj <- myts/decompose$seasonal
+decompose_adjseasonal_plot <- autoplot(seasonaladj,ylab='seasonal') +ggtitle('Adjusted seasonal component in the multiplicative time series model')
+grid.arrange(orginial_plot, decompose_adjtrend_plot,decompose_adjseasonal_plot, nrow=3)
+```
+
+:::
+
+When compared to the original figure, the corrected seasonal component has an upward trend and greater variability in the model, but the adjusted trend component has a stable trend through time.
+
+
+#### Lag Plots
+::: panel-tabset
+
+##### Daily Time Lags
+```{r warning=FALSE}
+#Lag plots 
+gglagplot(myts, do.lines=FALSE, lags=1)+xlab("Lag 1")+ylab("Yi")+ggtitle("Lag Plot for Microsoft Stock Jan 2018 - March 2023")
+```
+
+##### Monthly Time Lags
+```{r arning=FALSE}
+#montly data
+mean_data <- df %>% 
+  mutate(month = month(Date), year = year(Date)) %>% 
+  group_by(year, month) %>% 
+  summarize(mean_value = mean(MSFT.Adjusted))
+
+#ts for month data
+month<-ts(mean_data$mean_value,star=decimal_date(as.Date("2018-01-01",format = "%Y-%m-%d")),frequency = 12)
+
+#Lag plot for month
+ts_lags(month)
+```
+
+:::
+
+Microsoft Stock Lag Plot As there is a positive correlation and an inclination angle of 45 degrees, there should be a significant link between the series and the relevant lag from January 2018 to March 2023. This is the lag plot hallmark of a process that has a high degree of positive autocorrelation. Such processes are highly non-random---there is a substantial relationship between one observation and the next. Seasonality can also be investigated by plotting observations for a wider number of time periods, i.e. the lags. The time series data is aggregated to monthly data using the mean function for a better comprehension of the series and crisper plots. Further inspection of the last graph reveals that more dots are on the diagonal line at 45 degrees. The second graph shows the monthly variation of the variable on the vertical axis. In chronological order, the lines connect the points. The connection is strongly positive, confirming the data's strong seasonality, and there is a correlation.
+
+
+#### Moving Average
+::: panel-tabset
+##### 4 Month MA
+
+```{r warning=FALSE}
+#SMA Smoothing - 4 month
+ma <- autoplot(month, series="Data") +
+  autolayer(ma(month,5), series="4 month MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Microsoft Stock Jan 2018 - March 2023 (4 Month Moving Average") +
+  scale_colour_manual(values=c("Data"="grey50","4 month MA"="red"),
+                      breaks=c("Data","4 month MA"))
+ma
+```
+
+##### 1 Year MA
+```{r warning=FALSE}
+#SMA Smoothing - 1 Year
+ma <- autoplot(month, series="Data") +
+  autolayer(ma(month,13), series="1 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Microsoft Stock Jan 2018 - March 2023 (1 Year Moving Average") +
+  scale_colour_manual(values=c("Data"="grey50","1 Year MA"="red"),
+                      breaks=c("Data","1 Year MA"))
+ma
+```
+
+##### 3 Year MA
+```{r warning=FALSE}
+#SMA Smoothing - 3 Year
+ma <- autoplot(month, series="Data") +
+  autolayer(ma(month,37), series="3 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Microsoft Stock Jan 2018 - March 2023 (3 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","3 Year MA"="red"),
+                      breaks=c("Data","3 Year MA"))
+ma
+```
+::: 
+The four plots above show the Microsoft stock prices for the period between Jan 2018 and March 2023, smoothed using 4-month, 1-year and 3-year moving averages.
+
+Looking at the plots, we can see that the moving average values are increasing over time. The 4-month MA plot shows a lot of fluctuations, which is expected because it captures the short-term variations in the stock prices. On the other hand, the 1-year and 3-year MA plots smooth out the fluctuations and show the overall trend of the stock prices.
+
+We can observe that the 3-year MA plot provides a smoother trend as it takes into account a longer time period compared to the other plots. The 1-year MA plot also provides a relatively smooth trend, but it captures shorter-term variations compared to the 3-year MA plot. The 4-month MA plot is even more sensitive to shorter-term variations in the stock prices. From the moving average obtained above we can see that there is upward tend in the stock price of Microsoft.
+
+
+
+#### Autocorrelation Time Series
+::: panel-tabset
+
+##### ACF
+
+```{r warning=FALSE}
+#ACF plots for month data
+ggAcf(myts)+ggtitle("ACF Plot for Microsoft Stock Jan 2018 - March 2023")
+```
+
+##### PACF
+
+```{r warning=FALSE}
+#PACF plots for month data
+ggPacf(myts)+ggtitle("PACF Plot for Microsoft Stock Jan 2018 - March 2023")
+```
+
+##### ADF Test
+```{r warning=FALSE}
+# ADF Test
+tseries::adf.test(myts)
+```
+
+:::
+
+There is clear autocorrelation in lag in the plot of autocorrelation function, which is the acf graph for monthly data. The lag plots and autocorrelation plots shown above suggest seasonality in the series, indicating that it is not stationary. It was also validated using the Augmented Dickey-Fuller Test, which indicates that the series is not stationary as the p value is more than 0.05.
+
+#### Detrend and Differenced Time Series
+
+::: panel-tabset
+
+##### Linear Fitting Model
+
+```{r warning=FALSE}
+fit = lm(myts~time(myts), na.action=NULL) 
+summary(fit) 
+```
+
+##### ACF Plot
+```{r warning=FALSE}
+
+# plot ACFs
+plot1 <- ggAcf(myts, 48, main="Original Data: Microsoft Stock Price")
+plot2 <- ggAcf(resid(fit), 48, main="detrended data") 
+plot3 <- ggAcf(diff(myts), 48, main="first differenced data")
+grid.arrange(plot1, plot2, plot3,nrow=3)
+
+```
+
+:::
+
+The estimated slope coefficient β1, 6.689e+01. With a standard error of 8.075e-01, yielding a significant estimated increase of stock price is very less yearly. Equation of the fit for stationary process: $$\hat{y}_{t} = x_{t}+(1.349e+05)-(6.689e+01)t$$
+
+From the above graph we can say that there is high correlation in the original plot, but in the detrended plot the correlation is reduced but there is still high correlation in the detrended data.But when the first order difference is applied the high correlation is removed but there is seasonal correlation.
+
+As depicted in the above figure, the series is now stationary and ready for future study.
+
+### Gross Domestic Product Growth Rate
+
+#### Time Series Plot
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+#import the data
+gdp <- read.csv("DATA/RAW DATA/gdp-growth.csv")
+
+#change date format
+gdp$Date <- as.Date(gdp$DATE , "%m/%d/%Y")
+
+#drop DATE column
+gdp <- subset(gdp, select = -c(1))
+
+#export the cleaned data
+gdp_clean <- gdp
+write.csv(gdp_clean, "DATA/CLEANED DATA/gdp_clean_data.csv", row.names=FALSE)
+
+#plot gdp growth rate 
+fig <- plot_ly(gdp, x = ~Date, y = ~value, type = 'scatter', mode = 'lines',line = list(color = 'rgb(220,20,60)'))
+fig <- fig %>% layout(title = "U.S GPD Growth Rate: 2010 - 2022",xaxis = list(title = "Time"),yaxis = list(title ="GDP Growth Rate"))
+fig
+
+```
+
+The trend in GDP growth rate in the United States from 2010 to 2022 has been characterized by moderate fluctuations, reflecting a range of economic conditions and policy responses. Between 2010 and 2022, the United States experienced a range of GDP growth rates, reflecting various economic conditions and policy responses. In the early years of this period, the economy was still recovering from the 2008 financial crisis, which had led to a prolonged period of slow growth. In 2012, GDP growth began to pick up, reaching 2.8% that year, followed by 1.8% in 2013 and 2.5% in 2014. The peak in this period came in 2018, when the GDP growth rate reached 2.9%. However, the momentum of growth slowed in the years that followed. In 2016, GDP growth declined to 1.6%, followed by 2.2% in 2018, and 2.9% in 2018. By 2019, growth had slowed again to 2.2%. This period of slower growth was attributed to a range of factors, including the tightening of monetary policy by the Federal Reserve, global economic headwinds, and ongoing concerns about political instability and trade tensions. The COVID-19 pandemic in 2020 led to a sharp contraction in economic activity, with GDP growth declining by 3.5%, the largest annual decline since the 1940s. The pandemic resulted in widespread shutdowns of businesses, schools, and public spaces, as well as disruptions to global supply chains and trade. However, the US government and the Federal Reserve responded with a range of fiscal and monetary policies, including direct payments to households, increased unemployment benefits, and massive injections of liquidity into financial markets. These measures helped to mitigate the impact of the pandemic on the economy. In 2021, the US economy began to recover, with GDP growth projected to reach 6.3% by the end of the year. This rebound was due to a combination of factors, including the easing of pandemic-related restrictions, increased vaccination rates, and the continuation of government stimulus measures.
+
+The GDP growth rate in the United States from 2010 to 2021, there appears to be some seasonality in the data. he seasonality appears to be relatively consistent over time, with spikes in GDP growth rate occurring in the second quarter of each year, followed by a dip in the third quarter. This pattern is likely due to various factors, such as changes in consumer spending and production schedules. Multiplicative decomposition model may be more appropriate, as it accounts for changes in both the level and the variability of the data.
+
+#### Decomposed Time Series
+
+::: panel-tabset
+
+##### Decomposition Plot
+
+```{r warning=FALSE}
+#convert to ts data
+myts<-ts(gdp$value,frequency=4,start=c(2010/1/1))
+#decomposition
+orginial_plot <- autoplot(myts,xlab ="Year", ylab = "GDP Growth Rate", main = "U.S GDP Growth Rate: 2010 - 2021")
+decompose = decompose(myts,"multiplicative")
+autoplot(decompose)
+```
+
+##### Adjusted Decomposition Plot
+```{r warning=FALSE}
+#adjusted decomposition
+trendadj <- myts/decompose$trend
+decompose_adjtrend_plot <- autoplot(trendadj,ylab='seasonal') +ggtitle('Adjusted trend component in the multiplicative time series model')
+seasonaladj <- myts/decompose$seasonal
+decompose_adjseasonal_plot <- autoplot(seasonaladj,ylab='seasonal') +ggtitle('Adjusted seasonal component in the multiplicative time series model')
+grid.arrange(orginial_plot, decompose_adjtrend_plot,decompose_adjseasonal_plot, nrow=3)
+```
+
+:::
+
+When compared to the original plot, the adjusted seasonal component tends to have more fluctuation, and the model is more variable than the original plot, where the plot changes over time but the trend stays the same.
+
+#### Lag Plots
+::: panel-tabset
+
+##### Daily Time Lags
+```{r warning=FALSE}
+#Lag plots 
+gglagplot(myts, do.lines=FALSE, lags=1)+xlab("Lag 1")+ylab("Yi")+ggtitle("Lag Plot for U.S GDP Growth Rate: 2010 - 2021")
+```
+
+##### Monthly Time Lags
+```{r arning=FALSE}
+#montly data
+mean_data <- gdp %>% 
+  mutate(month = month(Date), year = year(Date)) %>% 
+  group_by(year, month) %>% 
+  summarize(mean_value = mean(value))
+
+month<-ts(mean_data$mean_value,star=decimal_date(as.Date("2010-01-01",format = "%Y-%m-%d")),frequency = 4)
+
+#Lag plot for month
+ts_lags(month,lags = c(1, 4, 7, 10) )
+
+```
+
+:::
+
+The lag plot shows that there is a cluster in the middle, and the monthly lag plot shows that there is no autocorrelation. 
+
+#### Moving Average
+::: panel-tabset
+
+##### 4 Month MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="gdp") +
+  autolayer(ma(month,5), series="4 Month MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("GDP Growth Rate 2010 - 2022 (4 Month Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","4 Month MA"="red"),
+                      breaks=c("Data","4 Month MA"))
+ma
+```
+
+##### 1 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="gdp") +
+  autolayer(ma(month,13), series="1 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("GDP Growth Rate 2010 - 2022 (1 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","1 Year MA"="red"),
+                      breaks=c("Data","1 Year MA"))
+ma
+```
+
+
+##### 3 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="gdp") +
+  autolayer(ma(month,37), series="3 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("GDP Growth Rate 2010 - 2022 (3 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","3 Year MA"="red"),
+                      breaks=c("Data","3 Year MA"))
+ma
+```
+:::
+
+The three plots show the same data series of GDP growth rate from 2010 to 2022, but each plot has a different moving average smoothing applied to it. The first plot shows a 4-month moving average, the second plot shows a 1-year moving average, and the third plot shows a 3-year moving average.
+
+Looking at the three plots, we can see that the 4-month moving average plot has a lot of fluctuations, and it follows the ups and downs of the original data series more closely. The 1-year moving average plot has less fluctuations compared to the 4-month moving average plot, and it provides a smoother trend of the data series. The 3-year moving average plot has even less fluctuations and a much smoother trend than the previous two plots.
+
+The choice of moving average window size depends on the analyst's preference and the objective of the analysis. Shorter window sizes like the 4-month moving average can provide more detailed insights into the data series, but they may also be more susceptible to noise and fluctuations. Longer window sizes like the 3-year moving average can provide a more stable and robust trend but may smooth out important details in the data series. As the moving average increases, GDP Growth Rtae tend to have no trend, it seem to be stable.
+
+#### Autocorrelation Time Series
+::: panel-tabset
+
+##### ACF
+
+```{r warning=FALSE}
+#ACF plots for month data
+ggAcf(myts)+ggtitle("ACF Plot for GDP Growth Rate: 2010 - 2022")
+```
+
+##### PACF
+
+```{r warning=FALSE}
+#PACF plots for month data
+ggPacf(myts)+ggtitle("PACF Plot for GDP Growth Rate: 2010 - 2022")
+```
+
+##### ADF Test
+```{r warning=FALSE}
+# ADF Test
+tseries::adf.test(myts)
+```
+
+:::
+
+The above autocorrelation plots show that the series doesn't change with the seasons, which indicates that there series is stationary. This is verified was checked using the Augmented Dickey-Fuller Test and the result of the test says that series is stationary because the p value is less than 0.05. 
+
+
+### Interest Rate
+
+#### Time Series Plot 
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+#import the data
+interest_data <- read.csv("DATA/RAW DATA/interest-rate.csv")
+
+#change date format
+interest_data$Date <- as.Date(interest_data$Date , "%m/%d/%Y")
+
+#export the cleaned data
+interest_clean_data <- interest_data
+write.csv(interest_clean_data, "DATA/CLEANED DATA/interest_rate_clean_data.csv", row.names=FALSE)
+
+#plot interest rate 
+fig <- plot_ly(interest_data, x = ~Date, y = ~value, type = 'scatter', mode = 'lines',line = list(color='rgb(176,224,230)'))
+fig <- fig %>% layout(title = "U.S Interest Rate: January 2010 - March 2023",xaxis = list(title = "Time"),yaxis = list(title ="Interest Rate"))
+fig
+
+```
+
+The interest rate in the United States has exhibited fluctuations from 2010 to 2022. In the years following the 2008 global financial crisis, the interest rate was very low. The interest rate in the US was very low and stable from 2010 to 2018. During this period, the Federal Reserve implemented several monetary policy measures, such as quantitative easing and forward guidance, in order to stimulate the economy and support economic recovery after the global financial crisis.
+
+Starting in 2018, the Federal Reserve began a gradual process of raising interest rates as the US economy continued to improve. This process of increasing interest rates was driven by a combination of factors such as low unemployment rates, a steady increase in GDP, and the need to prevent inflation from rising too quickly.
+
+However, as global economic conditions became more uncertain, the Federal Reserve began to pause its process of increasing interest rates. The US-China trade war and concerns about the potential impact of Brexit led to a more cautious approach from the Federal Reserve. In 2019, the Federal Reserve lowered interest rates three times in response to these external factors.
+
+In 2020, the COVID-19 pandemic caused a major shock to the global economy, leading the Federal Reserve to take unprecedented measures to support the US economy. The Federal Reserve lowered interest rates to near-zero levels, implemented quantitative easing, and established several lending facilities to support businesses and households.
+
+There is no clear evidence of a relationship between the variability of the series and its level, which suggests that an additive model might be more appropriate. Additionally, an additive model can be useful when the trend is relatively stable and the amplitude of seasonal fluctuations remains constant over time.
+
+#### Decomposed Time Series
+
+::: panel-tabset
+
+##### Decomposition Plot
+
+```{r warning=FALSE}
+#convert to ts data
+myts<-ts(interest_data$value,frequency=12,start=c(2010/1/1))
+#decomposition
+orginial_plot <- autoplot(myts,xlab ="Year", ylab = "Interest Rate", main = "U.S Interest Rate: January 2010 - March 2023")
+decompose = decompose(myts,"additive")
+autoplot(decompose)
+```
+
+##### Adjusted Decomposition Plot
+```{r warning=FALSE}
+trendadj <- myts/decompose$trend
+decompose_adjtrend_plot <- autoplot(trendadj,ylab='seasonal') +ggtitle('Adjusted trend component in the additive time series model')
+seasonaladj <- myts/decompose$seasonal
+decompose_adjseasonal_plot <- autoplot(seasonaladj,ylab='seasonal') +ggtitle('Adjusted seasonal component in the additive time series model')
+grid.arrange(orginial_plot, decompose_adjtrend_plot,decompose_adjseasonal_plot, nrow=3)
+```
+
+:::
+
+When compared to the original figure, the corrected seasonal component shows seasonality in the model, but the adjusted trend component has a stable trend through time.
+
+#### Lag Plots
+::: panel-tabset
+
+##### Daily Time Lags
+```{r warning=FALSE}
+#Lag plots 
+gglagplot(myts, do.lines=FALSE, lags=1)+xlab("Lag 1")+ylab("Yi")+ggtitle("Lag Plot for U.S Interest Rate: January 2010 - March 2023")
+```
+
+##### Monthly Time Lags
+```{r arning=FALSE}
+#monthly data
+mean_data <- interest_data %>% 
+  mutate(month = month(Date), year = year(Date)) %>% 
+  group_by(year, month) %>% 
+  summarize(mean_value = mean(value))
+
+month<-ts(mean_data$mean_value,star=decimal_date(as.Date("2010-01-01",format = "%Y-%m-%d")),frequency = 12)
+
+#Lag plot for monthly data
+ts_lags(month)
+
+```
+
+:::
+
+There should be a strong relationship between the series and the pertinent lag from January 2010 to March 2023 because there is a positive correlation and an inclination angle of 45 degrees in the lag plot. This is the characteristic lag plot of a process with strong positive autocorrelation. One observation and the next have a significant link, making such processes remarkably non-random. Investigating seasonality also involves graphing observations over a larger range of time intervals, or the lags. To make the time series data easier to understand and create graphs with more clarity, the time series data is combined with monthly data using the mean function. A closer look at the previous graph indicates that there are more dots on the diagonal line at 45 degrees. The second graph displays the variable's monthly variation along the vertical axis. The lines link the points in the order of time. There is a correlation and it is significantly positive, supporting the strong seasonality of the data. 
+
+#### Moving Average
+::: panel-tabset
+
+##### 4 Month MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="interest_data") +
+  autolayer(ma(month,5), series="4 Month MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Interest Rate January 2010 - March 2023 (4 Month Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","4 Month MA"="red"),
+                      breaks=c("Data","4 Month MA"))
+ma
+```
+
+##### 1 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="interest_data") +
+  autolayer(ma(month,13), series="1 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Interest Rate January 2010 - March 2023 (1 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","1 Year MA"="red"),
+                      breaks=c("Data","1 Year MA"))
+ma
+```
+
+
+##### 3 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="interest_data") +
+  autolayer(ma(month,37), series="3 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Interest Rate January 2010 - March 2023 (3 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","3 Year MA"="red"),
+                      breaks=c("Data","3 Year MA"))
+ma
+```
+##### 5 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="interest_data") +
+  autolayer(ma(month,61), series="5 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Interest Rate January 2010 - March 2023 (5 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","5 Year MA"="red"),
+                      breaks=c("Data","5 Year MA"))
+ma
+```
+:::
+
+The Interest Rate is displayed for the time period between January 2010 and March 2023 in the four plots above, which have been smoothed using 4-month, 1-year, 3-year, and 5-year moving averages. We can observe from the graphs that the moving average values have been rising over time. Given that it captures the short-term differences in stock prices, the 4-month MA plot exhibits a great deal of volatility, which is to be expected. The 1-year, 3-year, and 5-year MA plots, on the other hand, tame the oscillations and reveal the general direction of stock prices. We can see that the 5-year MA plot, which considers a longer time period than the other plots, shows a trend that is smoother. The 3-year MA plot similarly shows a fairly smooth trend, but unlike the 5-year MA plot, it also shows shorter-term variability. Even more susceptible to short-term changes in stock prices is the 1-year MA plot. The trend for Interest Rate isn't stable, there is fluctuation in the trend but it seems that there is upward trend from 2020.
+
+
+#### Autocorrelation Time Series
+::: panel-tabset
+
+##### ACF
+
+```{r warning=FALSE}
+#ACF plots for monthly data
+ggAcf(myts)+ggtitle("ACF Plot for Interest Rate: January 2010 - March 2023")
+```
+
+##### PACF
+
+```{r warning=FALSE}
+#PACF plots for monthly data
+ggPacf(myts)+ggtitle("PACF Plot for Interest Rate: January 2010 - March 2023")
+```
+
+##### ADF Test
+```{r warning=FALSE}
+# ADF Test
+tseries::adf.test(myts)
+```
+
+:::
+
+The autocorrelation function plot, which is the acf graph for monthly data, clearly shows autocorrelation in lag. The series appears to be seasonal, according to the lag plots and autocorrelation plots displayed above, proving that it is not stable. The Augmented Dickey-Fuller Test, which reveals that the series is not stationary if the p value is more than 0.05, was also used to validate it.
+
+
+#### Detrend and Differenced Time Series
+
+::: panel-tabset
+
+##### Linear Fitting Model
+
+```{r warning=FALSE}
+fit = lm(myts~time(myts), na.action=NULL) 
+summary(fit) 
+```
+
+##### ACF Plot
+```{r warning=FALSE}
+
+plot1 <- ggAcf(myts, 48, main="Original Data: Interest Rate")
+plot2 <- ggAcf(resid(fit), 48, main="Detrended data") 
+plot3 <- ggAcf(diff(myts), 48, main="First differenced data")
+grid.arrange(plot1, plot2, plot3,nrow=3)
+
+```
+
+:::
+
+The estimated slope coefficient β1, 0.00933. With a standard error of 0.010034, yielding a significant estimated increase of stock price is very less yearly. Equation of the fit for stationary process: $$\hat{y}_{t} = x_{t}+(18.300672)-(0.00933.)t$$
+
+From the above graph we can say that there is high correlation in the original plot, but in the detrended plot the correlation is reduced but there is still high correlation in the detrended data.But when the first order difference is applied the high correlation is removed but there is seasonal correlation.
+
+As depicted in the above figure, the series is now stationary and ready for future study.
+
+### Inflation Rate
+
+#### Time Series Plot 
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+#import the data
+inflation_rate <- read.csv("DATA/RAW DATA/inflation-rate.csv")
+
+#cleaning the data
+#remove unwanted columns
+inflation_rate_clean <- subset(inflation_rate, select = -c(1,HALF1,HALF2))
+
+#convert the data to time series data
+inflation_data_ts <- ts(as.vector(t(as.matrix(inflation_rate_clean))), start=c(2010,1), end=c(2023,2), frequency=12)
+
+#export the data
+write.csv(inflation_rate_clean, "DATA/CLEANED DATA/inflation_rate_clean_data.csv", row.names=FALSE)
+
+
+#plot inflation rate 
+fig <- autoplot(inflation_data_ts, ylab = "Inflation Rate", color="#DB7093")+ggtitle("U.S Inflation Rate: January 2010 - February 2023")+theme_bw()
+ggplotly(fig)
+
+```
+The inflation rate in the United States has varied from year to year since 2010. From 2010 to 2018, the inflation rate generally remained below 2% per year, with some slight fluctuations. In 2016, it started to rise gradually and continued to increase until it reached a peak of 6.6% in June 2022. Since then, it has slightly decreased and as of February 2023. The COVID-19 pandemic has played a significant role in driving up inflation in the United States, as supply chain disruptions and increased demand have led to higher prices for goods and services. The Federal Reserve has taken steps to address inflation, including raising interest rates and reducing asset purchases, in order to keep it under control.
+
+Based on the plot of the inflation rate in the USA from 2010 to Feb 2023, it appears that there is a clear upward trend, and some level of seasonality as well. Therefore, it would be appropriate to use a multiplicative decomposition method for this time series data. A multiplicative model will allow us to separate the overall trend from the seasonal variations in a way that is appropriate for this type of data.
+
+#### Decomposed Time Series
+
+::: panel-tabset
+
+##### Decomposition Plot
+
+```{r warning=FALSE}
+#decomposition
+orginial_plot <- autoplot(inflation_data_ts,xlab ="Year", ylab = "Interest Rate", main = "U.S Inflation Rate: January 2010 - Feb 2023")
+decompose = decompose(inflation_data_ts,"multiplicative")
+autoplot(decompose)
+```
+
+##### Adjusted Decomposition Plot
+```{r warning=FALSE}
+trendadj <- inflation_data_ts/decompose$trend
+decompose_adjtrend_plot <- autoplot(trendadj,ylab='seasonal') +ggtitle('Adjusted trend component in the additive time series model')
+seasonaladj <- inflation_data_ts/decompose$seasonal
+decompose_adjseasonal_plot <- autoplot(seasonaladj,ylab='seasonal') +ggtitle('Adjusted seasonal component in the additive time series model')
+grid.arrange(orginial_plot, decompose_adjtrend_plot,decompose_adjseasonal_plot, nrow=3)
+```
+
+:::
+
+When compared to the original figure, the corrected seasonal component shows tend to show upward trend in the model, but the adjusted trend component has a stable trend through time with some fluctuation.
+
+#### Lag Plots
+::: panel-tabset
+
+##### Daily Time Lags
+```{r warning=FALSE}
+#Lag plots 
+gglagplot(inflation_data_ts, do.lines=FALSE, lags=1)+xlab("Lag 1")+ylab("Yi")+ggtitle("Lag Plot for U.S Inflation Rate: January 2010 - Feb 2023")
+```
+
+##### Monthly Time Lags
+```{r arning=FALSE}
+#Lag plot for monthly data
+ts_lags(inflation_data_ts)
+
+```
+
+:::
+
+There should be a strong relationship between the series and the pertinent lag from January 2010 to Feb 2023 because there is a positive correlation and an inclination angle of 45 degrees in the lag plot. This is the characteristic lag plot of a process with positive autocorrelation. One observation and the next have a significant link, making such processes remarkably random. Investigating seasonality also involves graphing observations over a larger range of time intervals, or the lags. To make the time series data easier to understand and create graphs with more clarity, the time series data is combined with monthly data using the mean function. The second graph displays the variable's monthly variation along the vertical axis. The lines link the points in the order of time. There is a correlation and it is significantly positive, supporting the seasonality of the data. 
+
+#### Moving Average
+::: panel-tabset
+
+##### 4 Month MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(inflation_data_ts, series="inflation_rate_clean") +
+  autolayer(ma(inflation_data_ts,5), series="4 Month MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Inflation Rate January 2010 - Feb 2023 (4 Month Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","4 Month MA"="red"),
+                      breaks=c("Data","4 Month MA"))
+ma
+```
+
+##### 1 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(inflation_data_ts, series="inflation_rate_clean") +
+  autolayer(ma(inflation_data_ts,13), series="1 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Inflation Rate January 2010 - Feb 20233 (1 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","1 Year MA"="red"),
+                      breaks=c("Data","1 Year MA"))
+ma
+```
+
+
+##### 3 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(inflation_data_ts, series="inflation_rate_clean") +
+  autolayer(ma(inflation_data_ts,37), series="3 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Inflation Rate January 2010 - Feb 2023 (3 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","3 Year MA"="red"),
+                      breaks=c("Data","3 Year MA"))
+ma
+```
+##### 5 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(inflation_data_ts, series="inflation_rate_clean") +
+  autolayer(ma(inflation_data_ts,61), series="5 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Inflation Rate January 2010 - Feb 2023 (5 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","5 Year MA"="red"),
+                      breaks=c("Data","5 Year MA"))
+ma
+```
+:::
+
+The Inflation Rate is displayed for the time period between January 2010 and Feb 2023 in the four plots above, which have been smoothed using 4-month, 1-year, 3-year, and 5-year moving averages. We can observe from the graphs that the moving average values have been rising over time. Given that it captures the short-term differences in stock prices, the 4-month MA plot exhibits a great deal of volatility, which is to be expected. The 1-year, 3-year, and 5-year MA plots, on the other hand, tame the oscillations and reveal the general direction of stock prices. We can see that the 5-year MA plot, which considers a longer time period than the other plots, shows a trend that is smoother. The 3-year MA plot similarly shows a fairly smooth trend, but unlike the 5-year MA plot, it also shows shorter-term variability. Even more susceptible to short-term changes in stock prices is the 1-year MA plot. As the moving average increases we can notive that the trend for Inflation Rate isn't stable is towards upward.
+
+
+#### Autocorrelation Time Series
+::: panel-tabset
+
+##### ACF
+
+```{r warning=FALSE}
+#ACF plots for monthly data
+ggAcf(inflation_data_ts)+ggtitle("ACF Plot for Inflation Rate: January 2010 - Feb 2023")
+```
+
+##### PACF
+
+```{r warning=FALSE}
+#PACF plots for monthly data
+ggPacf(inflation_data_ts)+ggtitle("PACF Plot for Inflation Rate: January 2010 - Feb 2023")
+```
+
+##### ADF Test
+```{r warning=FALSE}
+# ADF Test
+tseries::adf.test(inflation_data_ts)
+```
+
+:::
+
+The autocorrelation function plot, which is the acf graph for monthly data, clearly shows autocorrelation in lag. The series appears to be seasonal, according to the lag plots and autocorrelation plots displayed above, proving that it is not stable. The Augmented Dickey-Fuller Test, which reveals that the series is not stationary if the p value is more than 0.05, was also used to validate it. The p value obtained from ADF test is greater than 0.05, which indicates taht the series is not stationary.
+
+
+#### Detrend and Differenced Time Series
+
+::: panel-tabset
+
+##### Linear Fitting Model
+
+```{r warning=FALSE}
+fit = lm(inflation_data_ts~time(inflation_data_ts), na.action=NULL) 
+summary(fit) 
+```
+
+##### ACF Plot
+```{r warning=FALSE}
+# plot ACFs
+plot1 <- ggAcf(inflation_data_ts, 48, main="Original Data: Inflation Rate")
+plot2 <- ggAcf(resid(fit), 48, main="Detrended data") 
+plot3 <- ggAcf(diff(inflation_data_ts), 48, main="First differenced data")
+grid.arrange(plot1, plot2, plot3,nrow=3)
+```
+
+:::
+
+The estimated slope coefficient β1, 0.23655 With a standard error of 0.02148, yielding a significant estimated increase of stock price is very less yearly. Equation of the fit for stationary process: $$\hat{y}_{t} = x_{t}+(474.68145)-(0.23655)t$$
+
+From the above graph we can say that there is correlation in the original plot, but in the detrended plot the correlation is reduced but there is still high correlation in the detrended data.But when the first order difference is applied the high correlation is removed but there is seasonal correlation.
+
+As depicted in the above figure, the series is now stationary and ready for future study.
+
+### Unemployment Rate
+
+#### Time Series Plot 
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+#import the data
+unemployment_rate <- read.csv("DATA/RAW DATA/unemployment-rate.csv")
+
+#change date format
+unemployment_rate$Date <- as.Date(unemployment_rate$Date , "%m/%d/%Y")
+
+# export the data
+write.csv(unemployment_rate, "DATA/CLEANED DATA/unemployment_rate_clean_data.csv", row.names=FALSE)
+
+#plot unemployment rate 
+fig <- plot_ly(unemployment_rate, x = ~Date, y = ~Value, type = 'scatter', mode = 'lines',line = list(color = 'rgb(255,215,0)'))
+fig <- fig %>% layout(title = "U.S Unemployment Rate: January 2010 - March 2023",xaxis = list(title = "Time"),yaxis = list(title ="Unemployment Rate"))
+fig
+
+```
+
+The unemployment rate in the United States has seen significant fluctuations since 2010, with various economic factors contributing to changes in the rate over the years. The data from the Federal Reserve Economic Data (FRED) series shows that the unemployment rate peaked at 9.9% in 2010, following the 2008 financial crisis. However, it has steadily declined over the years and currently stands at 3.9% as of February 2023.
+
+The first half of the 2010s saw a slow but steady decline in the unemployment rate, dropping from the 9.9% peak in 2010 to 5.3% by 2018. The latter half of the decade saw even further improvements, with the rate hitting a low of 3.5% in September 2019. However, the onset of the COVID-19 pandemic in early 2020 led to a sharp increase in unemployment, with the rate skyrocketing to 14.8% in April of that year.
+
+Since then, the unemployment rate has been slowly but steadily improving as the economy recovers from the pandemic-induced recession. By the end of 2021, the rate had fallen to 4.2% and has continued to decline into 2022 and 2023. However, it is worth noting that some industries and sectors are still struggling to recover from the pandemic, and some individuals have not yet returned to the labor force, which could impact the overall unemployment rate.
+
+Overall, the unemployment rate in the United States has undergone significant fluctuations over the past decade, with various economic and social factors contributing to the changes.
+
+From the graph, it appears that the magnitude of the seasonal fluctuations in the unemployment rate has remained relatively constant over time, while the overall trend has shown both increasing and decreasing phases. Therefore, an additive decomposition method could be appropriate for analyzing the time series data. 
+
+#### Decomposed Time Series
+
+::: panel-tabset
+
+##### Decomposition Plot
+
+```{r warning=FALSE}
+#convert the data to ts data
+myts<-ts(unemployment_rate$Value,frequency=12,start=c(2010/1/1))
+#decomposition
+orginial_plot <- autoplot(myts,xlab ="Year", ylab = "Interest Rate", main = "U.S Unemployment Rate: January 2010 - March 2023")
+decompose = decompose(myts,"additive")
+autoplot(decompose)
+```
+
+##### Adjusted Decomposition Plot
+```{r warning=FALSE}
+trendadj <- myts/decompose$trend
+decompose_adjtrend_plot <- autoplot(trendadj,ylab='seasonal') +ggtitle('Adjusted trend component in the additive time series model')
+seasonaladj <- myts/decompose$seasonal
+decompose_adjseasonal_plot <- autoplot(seasonaladj,ylab='seasonal') +ggtitle('Adjusted seasonal component in the additive time series model')
+grid.arrange(orginial_plot, decompose_adjtrend_plot,decompose_adjseasonal_plot, nrow=3)
+```
+
+:::
+
+When compared to the original figure, the corrected seasonal component shows some seasonality in the model, but the adjusted trend component has a stable trend through time with a high increase due to pandemic, but there the trend dropped after few months.
+
+#### Lag Plots
+::: panel-tabset
+
+##### Daily Time Lags
+```{r warning=FALSE}
+#Lag plots 
+gglagplot(myts, do.lines=FALSE, lags=1)+xlab("Lag 1")+ylab("Yi")+ggtitle("Lag Plot for U.S Unemployment Rate: January 2010 - March 2023")
+```
+
+##### Monthly Time Lags
+```{r arning=FALSE}
+#monthly data
+mean_data <- unemployment_rate %>% 
+  mutate(month = month(Date), year = year(Date)) %>% 
+  group_by(year, month) %>% 
+  summarize(mean_value = mean(Value))
+month<-ts(mean_data$mean_value,star=decimal_date(as.Date("2010-01-01",format = "%Y-%m-%d")),frequency = 12)
+#Lag plot for monthly data
+ts_lags(month)
+
+```
+
+:::
+
+There should be a strong relationship between the series and the pertinent lag from January 2010 to March 2023 because there is a positive correlation and an inclination angle of 45 degrees in the lag plot. This is the characteristic lag plot of a process with strong positive autocorrelation. One observation and the next have a significant link, making such processes remarkably non-random. Investigating seasonality also involves graphing observations over a larger range of time intervals, or the lags. To make the time series data easier to understand and create graphs with more clarity, the time series data is combined with monthly data using the mean function. A closer look at the previous graph indicates that there are more dots on the diagonal line at 45 degrees. The second graph displays the variable's monthly variation along the vertical axis. The lines link the points in the order of time. There is a correlation and it is significantly positive, supporting the strong seasonality of the data. 
+
+#### Seasonality
+
+```{r}
+ts_heatmap(myts, color = "Oranges", title = "Seasonality plot for Unemployment Rate USA")
+```
+
+#### Moving Average
+::: panel-tabset
+
+##### 4 Month MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="unemployment_rate") +
+  autolayer(ma(month,5), series="4 Month MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Unemployment Rate January 2010 - March 2023 (4 Month Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","4 Month MA"="red"),
+                      breaks=c("Data","4 Month MA"))
+ma
+```
+
+##### 1 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="unemployment_rate") +
+  autolayer(ma(month,13), series="1 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Unemployment Rate January 2010 - March 2023 (1 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","1 Year MA"="red"),
+                      breaks=c("Data","1 Year MA"))
+ma
+```
+
+
+##### 3 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="unemployment_rate") +
+  autolayer(ma(month,37), series="3 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Unemployment Rate January 2010 - March 2023 (3 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","3 Year MA"="red"),
+                      breaks=c("Data","3 Year MA"))
+ma
+```
+##### 5 Year MA
+```{r warning=FALSE}
+#SMA Smoothing 
+ma <- autoplot(month, series="unemployment_rate") +
+  autolayer(ma(month,61), series="5 Year MA") +
+  xlab("Year") + ylab("GWh") +
+  ggtitle("Unemployment Rate January 2010 - March 2023 (5 Year Moving Average)") +
+  scale_colour_manual(values=c("Data"="grey50","5 Year MA"="red"),
+                      breaks=c("Data","5 Year MA"))
+ma
+```
+:::
+
+The Unemployment Rate is displayed for the time period between January 2010 and March 2023 in the four plots above, which have been smoothed using 4-month, 1-year, 3-year, and 5-year moving averages. We can observe from the graphs that the moving average values have been rising over time. Given that it captures the short-term differences in stock prices, the 4-month MA plot exhibits a great deal of volatility, which is to be expected. The 1-year, 3-year, and 5-year MA plots, on the other hand, tame the oscillations and reveal the general direction of stock prices. We can see that the 5-year MA plot, which considers a longer time period than the other plots, shows a trend that is smoother. The 3-year MA plot similarly shows a fairly smooth trend, but unlike the 5-year MA plot, it also shows shorter-term variability. Even more susceptible to short-term changes in stock prices is the 1-year MA plot. The trend for Unemployment Rate was downward from 2010 to 2019, but there is increase in the moving average due to the increase in unemployment rate in US during pandemic.
+
+
+#### Autocorrelation Time Series
+::: panel-tabset
+
+##### ACF
+
+```{r warning=FALSE}
+#ACF plots 
+ggAcf(myts)+ggtitle("ACF Plot for Unemployment Rate: January 2010 - March 2023")
+```
+
+##### PACF
+
+```{r warning=FALSE}
+#PACF plots for monthly data
+ggPacf(myts)+ggtitle("PACF Plot for Unemployment Rate: January 2010 - March 2023")
+```
+
+##### ADF Test
+```{r warning=FALSE}
+# ADF Test
+tseries::adf.test(myts)
+```
+
+:::
+
+The autocorrelation function plot, which is the acf graph for monthly data, clearly shows autocorrelation in lag. The series appears to be seasonal, according to the lag plots and autocorrelation plots displayed above, proving that it is not stable. The Augmented Dickey-Fuller Test, which reveals that the series is not stationary if the p value is more than 0.05, was also used to validate it. The p value obtained from ADF test is greater than 0.05, which indicates taht the series is not stationary.
+
+
+#### Detrend and Differenced Time Series
+
+::: panel-tabset
+
+##### Linear Fitting Model
+
+```{r warning=FALSE}
+fit = lm(myts~time(myts), na.action=NULL) 
+summary(fit) 
+```
+
+##### ACF Plot
+```{r warning=FALSE}
+# plot ACFs
+plot1 <- ggAcf(myts, 48, main="Original Data: Unemployment Rate")
+plot2 <- ggAcf(resid(fit), 48, main="Detrended data") 
+plot3 <- ggAcf(diff(myts), 48, main="First differenced data")
+grid.arrange(plot1, plot2, plot3,nrow=3)
+```
+
+:::
+
+The estimated slope coefficient β1, -0.38635 With a standard error of 0.03587, yielding a significant estimated increase of stock price is very less yearly. Equation of the fit for stationary process: $$\hat{y}_{t} = x_{t}+(785.15846)-(0.38635)t$$
+
+From the above graph we can say that there is high correlation in the original plot, but in the detrended plot the correlation is reduced but there is still correlation in the detrended data.But when the first order difference is applied the high correlation is removed but there is seasonal correlation. 
+
+As depicted in the above figure, the series is now stationary and ready for future study.
+

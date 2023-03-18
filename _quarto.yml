@@ -1,0 +1,31 @@
+project:
+  type: website
+
+website:
+  search: false
+  navbar:
+    left:
+      - href: about.qmd
+        text: About Me
+      - href: introduction.qmd
+        text: Introduction
+      - ds.qmd
+      - dv.qmd
+      - eda.qmd
+      - arma.qmd
+      - saf.qmd
+      - ftsm.qmd
+      - dl.qmd
+      - conclusion.qmd
+      
+
+format:
+  html:
+    theme: yeti
+    css: styles1.css
+    toc: true
+
+
+
+editor: visual
+
